@@ -60,11 +60,10 @@ def get_clones(module, N):
 	'''
 	return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
-
-
 class MultiHeadAttention(nn.Module):
 	'''This is a Mult-Head wide self-attention class.'''
-	def __init__(self,heads,d_model,first=None,context_window=context_window,pred_window=prediction_window,dropout=0.1,mask=None):
+	def __init__(self, heads, d_model, context_window, pred_window,
+		first = None, dropout = 0.1, mask = None):
 		super().__init__()
 		
 		self.h = heads
@@ -187,10 +186,10 @@ class FeedForward(nn.Module):
 		super().__init__()
 		
 		self.linear = nn.Sequential(
-			nn.Linear(d_model,10*d_model),
+			nn.Linear(d_model,10 * d_model),
 			nn.ReLU(),
 			nn.Dropout(dropout),
-			nn.Linear(10*d_model,d_model)
+			nn.Linear(10 * d_model,d_model)
 		)
 	
 	def forward(self, x):
@@ -199,7 +198,7 @@ class FeedForward(nn.Module):
 
 class DecoderLayer(nn.Module):
 	'''Decoder Layer class'''
-	def __init__(self,heads=heads_d,d_model=d_model_d,dropout=0.1,first_mask=first_mask):
+	def __init__(self, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
 		super().__init__()
 
 		self.d_model = d_model
@@ -209,8 +208,10 @@ class DecoderLayer(nn.Module):
 		self.norm_2 = nn.LayerNorm(d_model)
 		self.norm_3 = nn.LayerNorm(d_model)
 
-		self.attn_1 = MultiHeadAttention(heads,d_model,mask=first_mask)
-		self.attn_2 = MultiHeadAttention(heads,d_model,first=False)
+		self.attn_1 = MultiHeadAttention(heads, d_model, context_window, pred_window,
+			dropout = dropout, mask = first_mask)
+		self.attn_2 = MultiHeadAttention(heads, d_model, context_window, pred_window, dropout = dropout,
+			first = False)
 		self.ff = FeedForward(d_model)
 
 		self.dropout_1 = nn.Dropout(dropout)
@@ -229,12 +230,12 @@ class DecoderLayer(nn.Module):
 
 class Decoder(nn.Module):
 	'''Stacked Decoder layer.'''
-	def __init__(self,N=N_d,d_model=d_model_d,window=prediction_window):
+	def __init__(self, N, pe_window, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
 		super().__init__()
 
 		self.N = N
-		self.pe = PositionalEncoding(window,d_model)
-		self.decoderlayers = get_clones(DecoderLayer(),N)
+		self.pe = PositionalEncoding(pe_window, d_model)
+		self.decoderlayers = get_clones(DecoderLayer(heads, d_model, context_window, pred_window, dropout = dropout, first_mask), N)
 		self.norm = nn.LayerNorm(d_model)
 
 	def forward(self,x,enc_out):
@@ -246,7 +247,7 @@ class Decoder(nn.Module):
 
 class EncoderLayer(nn.Module):
 	'''Encoder layer class.'''
-	def __init__(self,heads=heads_e,d_model=d_model_e,dropout=0.1):
+	def __init__(self, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
 		super().__init__()
 
 		self.d_model = d_model
@@ -255,7 +256,8 @@ class EncoderLayer(nn.Module):
 		self.norm_1 = nn.LayerNorm(d_model)
 		self.norm_2 = nn.LayerNorm(d_model)
 
-		self.attn = MultiHeadAttention(heads,d_model,first=True)
+		self.attn = MultiHeadAttention(heads, d_model, context_window, pred_window,
+			dropout = dropout, mask = first_mask, first = True)
 		self.ff = FeedForward(d_model)
 
 		self.dropout_1 = nn.Dropout(dropout)
@@ -270,12 +272,12 @@ class EncoderLayer(nn.Module):
 
 class Encoder(nn.Module):
 	'''Stacked encoder class.'''
-	def __init__(self,d_model=d_model_e,N=N_e,window=context_window):
+	def __init__(self, N, pe_window, heads, d_model, context_window, pred_window, first_mask, dropout):
 		super().__init__()
 
 		self.N = N
-		self.pe = PositionalEncoding(window,d_model)
-		self.dynamiclayers = get_clones(EncoderLayer(),N)
+		self.pe = PositionalEncoding(pe_window, d_model)
+		self.dynamiclayers = get_clones(EncoderLayer(heads, d_model, context_window, pred_window, first_mask, dropout = dropout), N)
 		self.norm = nn.LayerNorm(d_model)
 
 	def forward(self,x):
@@ -286,27 +288,42 @@ class Encoder(nn.Module):
 		return self.norm(x)
 
 class Ml4fTransformer(nn.Module):
-	def __init__(self,experiment=experiment,d_model_e=d_model_e,dropout=0.1,window=context_window,pred_window=prediction_window,d_model_d=d_model_d):
+	'''
+	Main transformer class
+	Input to encoder has dimension: [batch,context_window,d_model_dynamic]
+	The output has the same dimension. We then flatten the encoder output and do a
+	linear mapping from the feature space to price space. Hence we have [batch,context_window].
+	We then reshape this to get [batch,context_window,d_decode] dimension. The input to the
+	decoder has dimension [batch,prediction_window,d_decode]. We then do the two-layer self-attention
+	here which results in an output of size [batch,prediction_window,d_decode]. We reshape this to
+	[batch,prediction_window] and then this is the final output of the model, which is first inverted, 
+	and then passed on to the loss function.
+	'''
+	def __init__(self, experiment = 'return', d_model_e = 5, d_model_d = 1,
+		N = 2, heads = 4, first_mask = create_mask(5, 5), dropout = 0.1,
+		context_window = 15, pred_window = 5, pe_window = 15):
 		super().__init__()
 		
 		self.d_model_d = d_model_d
 		self.d_model_e = d_model_e
-		self.window = window
+		self.context_window = context_window
 		self.pred_window = pred_window
-		self.dynamicencode = Encoder()
+		self.dynamicencode = Encoder(N, pe_window, heads, d_model_e,
+			context_window, pred_window, first_mask, dropout = dropout)
 
 		self.learn = nn.Sequential(
-			nn.Linear(window*d_model_e,window),
+			nn.Linear(context_window * d_model_e, context_window),
 			nn.ReLU(),
 			nn.Dropout(dropout)
 			)
 		
-		self.decoder = Decoder()
+		self.decoder = Decoder(N, pe_window, d_model_d, heads, context_window, pred_window,
+			first_mask, dropout = dropout)
 		
 		if experiment == 'return':
 
 			self.map = nn.Sequential(
-				nn.Linear(pred_window,pred_window),
+				nn.Linear(pred_window, pred_window),
 				nn.ReLU(),
 				nn.Dropout(dropout)
 				)
@@ -314,23 +331,12 @@ class Ml4fTransformer(nn.Module):
 		else:
 	
 			self.map = nn.Sequential(
-				nn.Linear(pred_window,pred_window),
+				nn.Linear(pred_window, pred_window),
 				nn.ReLU(),
 				nn.Dropout(dropout),
 				nn.Sigmoid()
 				)
 	
-
-	# Input to encoder has dimension: [batch,context_window,d_model_dynamic]
-	# The output has the same dimension.
-	# We then flatten the encoder output and do a linear mapping from the feature space to price space.
-	# Hence we have [batch,context_window]. We then reshape this to get [batch,context_window,d_decode] dimension.
-	# The input to the decoder has dimension [batch,prediction_window,d_decode]
-	# We then do the two-layer self-attention here which results in an output of size [batch,prediction_window,d_decode].
-	# We reshape this to [batch,prediction_window] and then this is the final output of the model, which is first inverted, 
-	# and then passed on to the loss function.
-
-
 	def forward(self,x,y):
 		b = x.size(0)
 		enc_output = self.dynamicencode(x)
