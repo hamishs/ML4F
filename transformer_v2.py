@@ -60,6 +60,28 @@ def get_clones(module, N):
 	'''
 	return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
+def scaled_dot_product_attention(k, q, v, mask = None):
+	'''
+	k : (batch, seq_len_k, heads, d_model)
+	q : (batch, seq_len_q, heads, d_model)
+	v : (batch, seq_len_v, heads, d_model)
+	'''
+
+	b, _, h, d = k.shape
+
+	k = k.transpose(1, 2).contiguous().view(b * h, -1, d)
+	q = q.transpose(1, 2).contiguous().view(b * h, -1, d)
+	v = v.transpose(1, 2).contiguous().view(b * h, -1, d)
+	
+	scores = torch.matmul(q, k.transpose(1, 2))
+	if mask is not None:
+		scores = scores.masked_fill(mask == 0, -1e9)
+	scores = F.softmax(scores,dim=2)
+
+	# Scaled dot-product.
+	scores = torch.matmul(scores, v).view(b, h, -1, d)
+	return scores.transpose(1, 2).contiguous().view(b, -1, h * d)
+
 class MultiHeadAttention(nn.Module):
 	'''This is a Mult-Head wide self-attention class.'''
 	def __init__(self, heads, d_model, context_window, pred_window,
@@ -81,102 +103,16 @@ class MultiHeadAttention(nn.Module):
 		self.unifyheads = nn.Linear(heads*d_model, d_model)
 
 	def forward(self, q, k, v):
-		
-		b, _, _ = q.size()
-		
-		if self.mask is not None:
 
-			k = self.k_linear(k).view(b, self.pred_window, self.h, self.d_model)
-			q = self.q_linear(q).view(b, self.pred_window, self.h, self.d_model)
-			v = self.v_linear(v).view(b, self.pred_window, self.h, self.d_model)
+		b = q.shape[0]
 
-			# Here we 'fold' the heads into the batch size to do the scaled dot-product computation.
-			k = k.transpose(1, 2).contiguous().view(b*self.h, self.pred_window, self.d_model)
-			q = q.transpose(1, 2).contiguous().view(b*self.h, self.pred_window, self.d_model)
-			v = v.transpose(1, 2).contiguous().view(b*self.h, self.pred_window, self.d_model)
+		k = self.k_linear(k).view(b, -1, self.h, self.d_model)
+		q = self.q_linear(q).view(b, -1, self.h, self.d_model)
+		v = self.v_linear(v).view(b, -1, self.h, self.d_model)
 
-			scores = torch.matmul(q, k.transpose(1, 2))
-			scores = scores/math.sqrt(self.d_model)
+		output = scaled_dot_product_attention(k, q, v, mask = self.mask)
+		output = self.unifyheads(output)
 
-			# Use mask of size [1,pred,pred]
-			masking = self.mask
-			scores = scores.masked_fill(masking == 0,-1e9)
-
-			# Create the attention matrix using row-wise softmax operation.
-			scores = F.softmax(scores,dim=2)
-
-			# Scaled dot-product.
-			scores = torch.matmul(scores, v).view(b, self.h, self.pred_window, self.d_model)
-			concat = scores.transpose(1, 2).contiguous().view(b, self.pred_window, self.h*self.d_model)
-
-			# Linear mapping to reduce dimension -1 from heads*d_model to d_model.
-			output = self.unifyheads(concat)
-
-			# Scores if first == True is a tensor with size [batch*heads,prediction_window,prediction_window]
-			# ScoresXvalues is [batch*heads,prediction_window,prediction_window]x[batch*heads,self.pred_window,self.d_model_dynamic]
-			# Giving a final matrix of size [batch,prediction_window,d_model_dynamic] (after the unification of the heads)
-
-			# Scores if first == False is a tensor with size [batch*heads,prediction_window,context_window]
-			# ScoresXvalues is [batch*heads,prediction_window,context_window]x[batch*heads,context_window,d_model_dynamic]
-			# Hence we end up with a final tensor of size:
-			# [batch,prediction_window,d_model_static] (after the unification of the heads).
-
-			# Need to change the mask for each of these cases!
-			   
-		else:
-
-			if self.first == True:
-		  
-				k = self.k_linear(k).view(b, self.context_window, self.h, self.d_model)
-				q = self.q_linear(q).view(b, self.context_window, self.h, self.d_model)
-				v = self.v_linear(v).view(b, self.context_window, self.h, self.d_model)
-
-				# Here we 'fold' the heads into the batch size to do the scaled dot-product computation.
-				k = k.transpose(1, 2).contiguous().view(b*self.h, self.context_window, self.d_model)
-				q = q.transpose(1, 2).contiguous().view(b*self.h, self.context_window, self.d_model)
-				v = v.transpose(1, 2).contiguous().view(b*self.h, self.context_window, self.d_model)
-
-				scores = torch.matmul(q, k.transpose(1, 2))
-				scores = scores/math.sqrt(self.d_model)
-
-				# Create the attention matrix using row-wise softmax operation.
-				scores = F.softmax(scores,dim=2)
-
-				# Scaled dot-product.
-				scores = torch.matmul(scores, v).view(b, self.h, self.context_window, self.d_model)
-				concat = scores.transpose(1, 2).contiguous().view(b, self.context_window, self.h*self.d_model)
-
-				# Linear mapping to reduce dimension -1 from heads*d_model to d_model.
-				output = self.unifyheads(concat)
-
-			elif self.first == False:
-
-				k = self.k_linear(k).view(b, self.context_window, self.h, self.d_model)
-				q = self.q_linear(q).view(b, self.pred_window, self.h, self.d_model)
-				v = self.v_linear(v).view(b, self.context_window, self.h, self.d_model)
-
-				# Here we 'fold' the heads into the batch size to do the scaled dot-product computation.
-				k = k.transpose(1, 2).contiguous().view(b*self.h, self.context_window, self.d_model)
-				q = q.transpose(1, 2).contiguous().view(b*self.h, self.pred_window, self.d_model)
-				v = v.transpose(1, 2).contiguous().view(b*self.h, self.context_window, self.d_model)
-
-				scores = torch.matmul(q, k.transpose(1, 2))
-				scores = scores/math.sqrt(self.d_model)
-
-				# Use mask [1,p,c]
-				# masking = self.mask
-				# scores = scores.masked_fill(masking == 0,-1e9)
-
-				# Create the attention matrix using row-wise softmax operation.
-				scores = F.softmax(scores,dim=2)
-
-				# Scaled dot-product.
-				scores = torch.matmul(scores, v).view(b, self.h, self.pred_window, self.d_model)
-				concat = scores.transpose(1, 2).contiguous().view(b, self.pred_window, self.h*self.d_model)
-
-				# Linear mapping to reduce dimension -1 from heads*d_model to d_model.
-				output = self.unifyheads(concat)
-	
 		return output
 
 class FeedForward(nn.Module):
@@ -260,7 +196,7 @@ class DecoderLayer(nn.Module):
 		self.dropout_2 = nn.Dropout(dropout)
 		self.dropout_3 = nn.Dropout(dropout)
 
-	def forward(self,x,enc_out):
+	def forward(self, x, enc_out):
 	
 		x2 = self.norm_1(x)
 		x = x + self.dropout_1(self.attn_1(x2,x2,x2))
@@ -322,15 +258,12 @@ class Ml4fTransformer(nn.Module):
 			first_mask, dropout = dropout)
 		
 		if experiment == 'return':
-
 			self.map = nn.Sequential(
 				nn.Linear(pred_window, pred_window),
 				nn.ReLU(),
 				nn.Dropout(dropout)
 				)
-	
 		else:
-	
 			self.map = nn.Sequential(
 				nn.Linear(pred_window, pred_window),
 				nn.ReLU(),
