@@ -116,8 +116,8 @@ class DataPreProcess():
 		for i in range(1,(L_future+1)-self.pred_window):
 			future_input = future_tens[i:i+self.pred_window]
 			future_seq = torch.cat((future_seq,future_input),dim=0)
-	
-	return original_tens, future_seq
+
+		return original_tens, future_seq
 
 
 	# This method creates the price labels for each future sequence.
