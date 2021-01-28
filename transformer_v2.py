@@ -74,7 +74,6 @@ class MultiHeadAttention(nn.Module):
 		self.context_window = context_window
 		self.first = first
 		
-	   
 		self.q_linear = nn.Linear(d_model, heads*d_model,bias=False)
 		self.v_linear = nn.Linear(d_model, heads*d_model,bias=False)
 		self.k_linear = nn.Linear(d_model, heads*d_model,bias=False)
@@ -83,7 +82,7 @@ class MultiHeadAttention(nn.Module):
 
 	def forward(self, q, k, v):
 		
-		b,_,_ = q.size()
+		b, _, _ = q.size()
 		
 		if self.mask is not None:
 
@@ -196,55 +195,6 @@ class FeedForward(nn.Module):
 		x = self.linear(x)
 		return x 
 
-class DecoderLayer(nn.Module):
-	'''Decoder Layer class'''
-	def __init__(self, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
-		super().__init__()
-
-		self.d_model = d_model
-		self.heads = heads
-
-		self.norm_1 = nn.LayerNorm(d_model)
-		self.norm_2 = nn.LayerNorm(d_model)
-		self.norm_3 = nn.LayerNorm(d_model)
-
-		self.attn_1 = MultiHeadAttention(heads, d_model, context_window, pred_window,
-			dropout = dropout, mask = first_mask)
-		self.attn_2 = MultiHeadAttention(heads, d_model, context_window, pred_window, dropout = dropout,
-			first = False)
-		self.ff = FeedForward(d_model)
-
-		self.dropout_1 = nn.Dropout(dropout)
-		self.dropout_2 = nn.Dropout(dropout)
-		self.dropout_3 = nn.Dropout(dropout)
-
-	def forward(self,x,enc_out):
-	
-		x2 = self.norm_1(x)
-		x = x + self.dropout_1(self.attn_1(x2,x2,x2))
-		x2 = self.norm_2(x)
-		x = x + self.dropout_2(self.attn_2(x2,enc_out,enc_out))
-		x2 = self.norm_3(x)
-		x = x + self.dropout_3(self.ff(x2))
-		return x
-
-class Decoder(nn.Module):
-	'''Stacked Decoder layer.'''
-	def __init__(self, N, pe_window, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
-		super().__init__()
-
-		self.N = N
-		self.pe = PositionalEncoding(pe_window, d_model)
-		self.decoderlayers = get_clones(DecoderLayer(heads, d_model, context_window, pred_window, first_mask, dropout = dropout), N)
-		self.norm = nn.LayerNorm(d_model)
-
-	def forward(self,x,enc_out):
-		x = self.pe(x)
-
-		for i in range(self.N):
-			x = self.decoderlayers[i](x,enc_out)
-		return self.norm(x)
-
 class EncoderLayer(nn.Module):
 	'''Encoder layer class.'''
 	def __init__(self, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
@@ -277,7 +227,8 @@ class Encoder(nn.Module):
 
 		self.N = N
 		self.pe = PositionalEncoding(pe_window, d_model)
-		self.dynamiclayers = get_clones(EncoderLayer(heads, d_model, context_window, pred_window, first_mask, dropout = dropout), N)
+		self.dynamiclayers = get_clones(EncoderLayer(heads, d_model, context_window, pred_window,
+			first_mask, dropout = dropout), N)
 		self.norm = nn.LayerNorm(d_model)
 
 	def forward(self,x):
@@ -285,6 +236,56 @@ class Encoder(nn.Module):
 
 		for i in range(self.N):
 		  x = self.dynamiclayers[i](x)
+		return self.norm(x)
+
+class DecoderLayer(nn.Module):
+	'''Decoder Layer class'''
+	def __init__(self, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
+		super().__init__()
+
+		self.d_model = d_model
+		self.heads = heads
+
+		self.norm_1 = nn.LayerNorm(d_model)
+		self.norm_2 = nn.LayerNorm(d_model)
+		self.norm_3 = nn.LayerNorm(d_model)
+
+		self.attn_1 = MultiHeadAttention(heads, d_model, context_window, pred_window,
+			dropout = dropout, mask = first_mask, first = False)
+		self.attn_2 = MultiHeadAttention(heads, d_model, context_window, pred_window,
+			dropout = dropout, first = False)
+		self.ff = FeedForward(d_model)
+
+		self.dropout_1 = nn.Dropout(dropout)
+		self.dropout_2 = nn.Dropout(dropout)
+		self.dropout_3 = nn.Dropout(dropout)
+
+	def forward(self,x,enc_out):
+	
+		x2 = self.norm_1(x)
+		x = x + self.dropout_1(self.attn_1(x2,x2,x2))
+		x2 = self.norm_2(x)
+		x = x + self.dropout_2(self.attn_2(x2,enc_out,enc_out))
+		x2 = self.norm_3(x)
+		x = x + self.dropout_3(self.ff(x2))
+		return x
+
+class Decoder(nn.Module):
+	'''Stacked Decoder layer.'''
+	def __init__(self, N, pe_window, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
+		super().__init__()
+
+		self.N = N
+		self.pe = PositionalEncoding(pe_window, d_model)
+		self.decoderlayers = get_clones(DecoderLayer(heads, d_model, context_window,
+			pred_window, first_mask, dropout = dropout), N)
+		self.norm = nn.LayerNorm(d_model)
+
+	def forward(self,x,enc_out):
+		x = self.pe(x)
+
+		for i in range(self.N):
+			x = self.decoderlayers[i](x,enc_out)
 		return self.norm(x)
 
 class Ml4fTransformer(nn.Module):
@@ -317,7 +318,7 @@ class Ml4fTransformer(nn.Module):
 			nn.Dropout(dropout)
 			)
 		
-		self.decoder = Decoder(N, pe_window, d_model_d, heads, context_window, pred_window,
+		self.decoder = Decoder(N, pe_window, heads, d_model_d, context_window, pred_window,
 			first_mask, dropout = dropout)
 		
 		if experiment == 'return':
