@@ -191,9 +191,9 @@ def loaders(train_data, val_data, test_data,
 	batch_train = 20, batch_val = 66, batch_test = 66):
 	'''Helper function to create DataLoaders for training.'''
 
-	train_loader = DataLoader(train_data,batch_size=batch_train,shuffle=False)
-	val_loader = DataLoader(val_data,batch_size=batch_val,shuffle=False)
-	test_loader = DataLoader(test_data,batch_size=batch_test,shuffle=False)
+	train_loader = DataLoader(train_data, batch_size=batch_train, shuffle=False)
+	val_loader = DataLoader(val_data, batch_size=batch_val,shuffle=False)
+	test_loader = DataLoader(test_data, batch_size=batch_test,shuffle=False)
 
 	return train_loader, val_loader, test_loader
 
