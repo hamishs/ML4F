@@ -235,7 +235,7 @@ class Decoder(nn.Module):
 
 		self.N = N
 		self.pe = PositionalEncoding(pe_window, d_model)
-		self.decoderlayers = get_clones(DecoderLayer(heads, d_model, context_window, pred_window, dropout = dropout, first_mask), N)
+		self.decoderlayers = get_clones(DecoderLayer(heads, d_model, context_window, pred_window, first_mask, dropout = dropout), N)
 		self.norm = nn.LayerNorm(d_model)
 
 	def forward(self,x,enc_out):
