@@ -33,24 +33,24 @@ def split_data(input,label,future,split_one=split_one,split_two=split_two):
 class Ml4fDataset(Dataset):
 	'''Custom dataset class so that we can load input, future sequence
 	and label data simultaneously during training.'''
-    def __init__(self,input_data,label_data,future_data):
-        self.input_data = input_data
-        self.future_data = future_data
-        self.label_data = label_data
-        
-    def __len__(self):
-        return len(self.input_data)
-    
-    def __getitem__(self, index):
-        x = self.input_data[index]
-        x_fut = self.future_data[index]
-        y = self.label_data[index]
-        return x,x_fut,y
+	def __init__(self,input_data,label_data,future_data):
+		self.input_data = input_data
+		self.future_data = future_data
+		self.label_data = label_data
+		
+	def __len__(self):
+		return len(self.input_data)
+	
+	def __getitem__(self, index):
+		x = self.input_data[index]
+		x_fut = self.future_data[index]
+		y = self.label_data[index]
+		return x,x_fut,y
 
 class DataPreProcess():
 	'''This class handles all data pre-processing for the model.'''
- 	def __init__(self,url_input,url_label,window=context_window,label=experiment,portfolio_size=portfolio_size,pred_window=prediction_window,d_model_e=d_model_e):
-    
+	def __init__(self,url_input,url_label,window=context_window,label=experiment,portfolio_size=portfolio_size,pred_window=prediction_window,d_model_e=d_model_e):
+	
 		self.url_input = url_input
 		self.url_label = url_label
 		self.window = window
@@ -61,7 +61,7 @@ class DataPreProcess():
   
 	# Load input data.
 	def loading_input_data(self):
-    
+	
 		port_df = pd.read_csv(self.url_input)
 		port = port_df.to_numpy()
 		port = torch.Tensor(port)
@@ -69,11 +69,11 @@ class DataPreProcess():
 
 	# Load label data. Setting label to False removes the return labels which are not required for price prediction.
 	def loading_label_data(self):
-    
-	    label_df = pd.read_csv(self.url_label)
-	    label_nump = label_df.to_numpy()
+	
+		label_df = pd.read_csv(self.url_label)
+		label_nump = label_df.to_numpy()
 
-	    if self.label=='return':
+		if self.label=='return':
 			label_drop = np.delete(label_nump, slice(0, self.window), 0)
 			return_label = np.delete(label_drop,slice(0,73,3),1)
 			return_label = torch.tensor(np.delete(return_label,slice(0,49,2),1))
@@ -86,7 +86,7 @@ class DataPreProcess():
 			hit_label = torch.tensor(np.delete(hit_label,slice(1,50,2),1))
 			hit_label = hit_label.double()
 			return hit_label  
-    
+	
 		elif self.label=='price':
 			prices_drop = np.delete(label_nump, slice(0, self.window), 0)
 			prices_label = np.delete(prices_drop,slice(1,74,3),1)
@@ -97,12 +97,12 @@ class DataPreProcess():
 
 	# This method creates the input sequences and their corresponding future sequences.
 	def shift_window(self):
-    
+	
 		x = self.loading_input_data()
 		original_tens = x[0:self.window]
 		L = x.size(0)
 		total_window = self.window + self.pred_window - 1
-    
+	
 		for i in range(1,L-total_window):
 			train_input = x[i:i+self.window]
 			original_tens = torch.cat((original_tens,train_input),dim=0)
@@ -114,8 +114,8 @@ class DataPreProcess():
 		for i in range(1,(L_future+1)-self.pred_window):
 			future_input = future_tens[i:i+self.pred_window]
 			future_seq = torch.cat((future_seq,future_input),dim=0)
-    
-    return original_tens, future_seq
+	
+	return original_tens, future_seq
 
 
 	# This method creates the price labels for each future sequence.
@@ -126,8 +126,8 @@ class DataPreProcess():
 		L = y.size(0)
 
 		for i in range(1,(L+1)-self.pred_window):
-	  		train_label = y[i:i+self.pred_window]
-	  		label_tens = torch.cat((label_tens,train_label),dim=0)
+			train_label = y[i:i+self.pred_window]
+			label_tens = torch.cat((label_tens,train_label),dim=0)
 
 		return label_tens
 
@@ -141,7 +141,7 @@ class DataPreProcess():
 
 
   # Here we use the y labels as the future sequence.
-    
+	
 	def portfolio_stack(self):
 		x,x_fut = self.shift_window()
 		y = self.shift_pred()
@@ -158,7 +158,7 @@ class DataPreProcess():
 		x_tr, x_v, x_te, x_fut_tr, x_fut_v, x_fut_te, y_tr, y_v, y_te = split_data(x_prime,y_prime,y_prime)
 
 		for pos in range(1,potent):
-	    
+		
 			x_new = x[:,pos*self.portfolio_size*self.d_model_e:(pos+1)*self.portfolio_size*self.d_model_e]
 			x_new = x_new.view(-1,self.window,self.d_model_e)
 
@@ -201,17 +201,17 @@ class Normalisation():
 	believe this helps avoid the negative impact of outlier values
 	which may occur from using longer time periods.'''
 
- 	def __init__(self,context_window=context_window,predict_window=prediction_window,d_model_e=d_model_e,d_model_d=d_model_d):
-    
+	def __init__(self,context_window=context_window,predict_window=prediction_window,d_model_e=d_model_e,d_model_d=d_model_d):
+	
 	self.d_model_e= d_model_e
 	self.predict_window = predict_window
 	self.context_window = context_window
 	self.d_model_d = d_model_d
 
 
- 	def normal(self,x): 
-    	max_cols = []
-    	min_cols = []
+	def normal(self,x): 
+		max_cols = []
+		min_cols = []
 
 		x = x.view(-1,self.d_model_e)
 		one,two = x.size()
@@ -231,13 +231,13 @@ class Normalisation():
 		return x_norm, price_max, price_min
 
 	def normal_future(self,y):
-        
-	    y = y.view(-1,self.d_model_d)
-	    max = torch.max(y,dim=0)[0]
-	    min = torch.min(y,dim=0)[0]
-	    y = (y-min)/(max-min)
-	    y = y.view(-1,self.predict_window,self.d_model_d)
-	    return y
+		
+		y = y.view(-1,self.d_model_d)
+		max = torch.max(y,dim=0)[0]
+		min = torch.min(y,dim=0)[0]
+		y = (y-min)/(max-min)
+		y = y.view(-1,self.predict_window,self.d_model_d)
+		return y
 
 def accuracy_calc(x,y):
 	'''
@@ -245,15 +245,15 @@ def accuracy_calc(x,y):
 	If the absolute value of the difference between the output and the labels is < 0.5, 
 	then the output is an accurate prediction
 	'''
-    s,t = x.size()
-    total = s*t
-    
-    diff = torch.abs(x-y)
-    one = torch.ones(s,t)
-    zero = torch.zeros(s,t)
+	s,t = x.size()
+	total = s*t
+	
+	diff = torch.abs(x-y)
+	one = torch.ones(s,t)
+	zero = torch.zeros(s,t)
 
-    accuracy = torch.where(diff<0.5,one,zero)
-    acc_total = torch.sum(accuracy)
-    
-    percent = acc_total/total
-    return percent
+	accuracy = torch.where(diff<0.5,one,zero)
+	acc_total = torch.sum(accuracy)
+	
+	percent = acc_total/total
+	return percent
