@@ -63,9 +63,8 @@ def get_clones(module, N):
 
 
 class MultiHeadAttention(nn.Module):
-   '''This is a Mult-Head wide self-attention class.'''
-
-   def __init__(self,heads,d_model,first=None,context_window=context_window,pred_window=prediction_window,dropout=0.1,mask=None):
+	'''This is a Mult-Head wide self-attention class.'''
+	def __init__(self,heads,d_model,first=None,context_window=context_window,pred_window=prediction_window,dropout=0.1,mask=None):
 		super().__init__()
 		
 		self.h = heads

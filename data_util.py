@@ -49,7 +49,9 @@ class Ml4fDataset(Dataset):
 
 class DataPreProcess():
 	'''This class handles all data pre-processing for the model.'''
-	def __init__(self,url_input,url_label,window=context_window,label=experiment,portfolio_size=portfolio_size,pred_window=prediction_window,d_model_e=d_model_e):
+	def __init__(self,url_input,url_label, window = context_window,
+		label=experiment,portfolio_size=portfolio_size,
+		pred_window=prediction_window,d_model_e=d_model_e):
 	
 		self.url_input = url_input
 		self.url_label = url_label
