@@ -203,12 +203,12 @@ class Normalisation():
 	believe this helps avoid the negative impact of outlier values
 	which may occur from using longer time periods.'''
 
-	def __init__(self,context_window=context_window,predict_window=prediction_window,d_model_e=d_model_e,d_model_d=d_model_d):
+	def __init__(self, context_window = 15, predict_window = 5, d_model_e = 5, d_model_d = 1):
 	
-	self.d_model_e= d_model_e
-	self.predict_window = predict_window
-	self.context_window = context_window
-	self.d_model_d = d_model_d
+		self.d_model_e = d_model_e
+		self.predict_window = predict_window
+		self.context_window = context_window
+		self.d_model_d = d_model_d
 
 
 	def normal(self,x): 
@@ -238,7 +238,7 @@ class Normalisation():
 		max = torch.max(y,dim=0)[0]
 		min = torch.min(y,dim=0)[0]
 		y = (y-min)/(max-min)
-		y = y.view(-1,self.predict_window,self.d_model_d)
+		y = y.view(-1, self.predict_window, self.d_model_d)
 		return y
 
 def accuracy_calc(x,y):
