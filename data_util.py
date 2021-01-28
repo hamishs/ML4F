@@ -14,11 +14,11 @@ import copy
 import io
 from torch.autograd import Variable
 
-def split_data(input,label,future,split_one=split_one,split_two=split_two):
+def split_data(inputs, label, future, split_one = 1600, split_two = 1864):
 	'''Helper function for splitting data into train, validation and test splits.'''
-	input_train = input[:split_one,:]
-	input_val = input[split_one:split_two,:]
-	input_test = input[split_two:,:]
+	input_train = inputs[:split_one,:]
+	input_val = inputs[split_one:split_two,:]
+	input_test = inputs[split_two:,:]
 
 	future_train = future[:split_one,:]
 	future_val = future[split_one:split_two,:]
@@ -28,12 +28,12 @@ def split_data(input,label,future,split_one=split_one,split_two=split_two):
 	lab_val = label[split_one:split_two,:]
 	lab_test = label[split_two:,:]
 
-	return input_train, input_val, input_test, future_train, future_val,future_test,lab_train, lab_val, lab_test
+	return input_train, input_val, input_test, future_train, future_val, future_test, lab_train, lab_val, lab_test
 
 class Ml4fDataset(Dataset):
 	'''Custom dataset class so that we can load input, future sequence
 	and label data simultaneously during training.'''
-	def __init__(self,input_data,label_data,future_data):
+	def __init__(self, input_data, label_data, future_data):
 		self.input_data = input_data
 		self.future_data = future_data
 		self.label_data = label_data
@@ -49,9 +49,9 @@ class Ml4fDataset(Dataset):
 
 class DataPreProcess():
 	'''This class handles all data pre-processing for the model.'''
-	def __init__(self,url_input,url_label, window = context_window,
-		label=experiment,portfolio_size=portfolio_size,
-		pred_window=prediction_window,d_model_e=d_model_e):
+	def __init__(self,url_input,url_label, window = 15,
+		label = 'return', portfolio_size = 1,
+		pred_window = 5, d_model_e = 5):
 	
 		self.url_input = url_input
 		self.url_label = url_label
@@ -187,7 +187,8 @@ class DataPreProcess():
 
 		return train_data, val_data, test_data, sizes_check
 
-def loaders(train_data,val_data,test_data,batch_train=batch_train,batch_val=batch_val,batch_test=batch_test):
+def loaders(train_data, val_data, test_data,
+	batch_train = 20, batch_val = 66, batch_test = 66):
 	'''Helper function to create DataLoaders for training.'''
 
 	train_loader = DataLoader(train_data,batch_size=batch_train,shuffle=False)
