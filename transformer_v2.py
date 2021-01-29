@@ -282,7 +282,6 @@ class Ml4fTransformer(nn.Module):
 		enc_map = self.learn(enc_output) # (batch, pred_window * d_d)
 		enc_map = enc_map.view(-1, self.pred_window, self.d_model_d) # (batch, pred_window, d_d)
 		dec_output = self.decoder(y, enc_map) # (batch, pred_window, d_d)
-		print(dec_output.shape)
 
 		dec_output = dec_output.view(b, self.pred_window)
 		
