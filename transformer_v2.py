@@ -14,7 +14,7 @@ class PositionalEncoding(nn.Module):
 	def __init__(self, window, d_model):
 		super().__init__()
 
-		self.register_buffer('d_model', torch.tensor(d_model))
+		self.register_buffer('d_model', torch.tensor(d_model, dtype = torch.float64))
 
 		pe = torch.zeros(window, d_model)
 		for pos in range(window):
