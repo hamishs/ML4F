@@ -14,7 +14,7 @@ class PositionalEncoding(nn.Module):
 	def __init__(self, window, d_model):
 		super().__init__()
 
-		self.register_buffer('d_model', torch.Tensor(d_model))
+		self.register_buffer('d_model', torch.tensor(d_model))
 
 		pe = torch.zeros(window, d_model)
 		for pos in range(window):
@@ -128,7 +128,7 @@ class EncoderLayer(nn.Module):
 		self.dropout_1 = nn.Dropout(dropout)
 		self.dropout_2 = nn.Dropout(dropout)
 	
-	def forward(self,x):
+	def forward(self, x):
 		attn_out = self.dropout_1(self.attn(x, x, x))
 		x = self.norm_1(x + attn_out)
 
@@ -147,7 +147,7 @@ class Encoder(nn.Module):
 		self.pe = PositionalEncoding(pe_window, d_model)
 		self.dynamiclayers = get_clones(EncoderLayer(heads, d_model, dff, dropout = dropout), N)
 
-	def forward(self,x):
+	def forward(self, x):
 		# x (batch, seq_len, inp_dim)
 
 		x = self.embedding(x) # (batch, seq_len, d_model)
