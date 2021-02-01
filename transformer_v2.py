@@ -11,10 +11,11 @@ class PositionalEncoding(nn.Module):
 	mechanisms are permuatation equivariant. Naturally, this is not required in the static
 	transformer since there is no concept of 'order' in a portfolio.'''
 
-	def __init__(self,window,d_model):
+	def __init__(self, window, d_model):
 		super().__init__()
 
-		self.d_model = torch.Tensor(d_model)
+		self.register_buffer('d_model', d_model)
+
 		pe = torch.zeros(window, d_model)
 		for pos in range(window):
 			for i in range(0, d_model, 2):
