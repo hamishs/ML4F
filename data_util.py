@@ -231,10 +231,10 @@ class Normalisation():
 		x_norm = x_norm.view(-1,self.context_window,self.d_model_e)
 
 		price_max = max_cols[3]
-    		price_max = torch.exp(price_max)
-    		price_min = min_cols[3]
-    		price_min = torch.exp(price_min)
-    		return x_norm, price_max, price_min
+		price_max = torch.exp(price_max)
+		price_min = min_cols[3]
+		price_min = torch.exp(price_min)
+		return x_norm, price_max, price_min
 
 	def normal_future(self,y):
 		
