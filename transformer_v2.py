@@ -1,18 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-import torchvision
-from torchvision import transforms, utils
-import random
-import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
-import math
 import copy
-import io
-from torch.autograd import Variable
 
 class PositionalEncoding(nn.Module):
 	'''
@@ -21,36 +11,32 @@ class PositionalEncoding(nn.Module):
 	mechanisms are permuatation equivariant. Naturally, this is not required in the static
 	transformer since there is no concept of 'order' in a portfolio.'''
 
-	def __init__(self,window,d_model):
+	def __init__(self, window, d_model):
 		super().__init__()
+
+		self.register_buffer('d_model', torch.tensor(d_model, dtype = torch.float64))
 
 		pe = torch.zeros(window, d_model)
 		for pos in range(window):
 			for i in range(0, d_model, 2):
-			  pe[pos, i] = math.sin(pos / (10000 ** ((2 * i)/d_model)))
+			  pe[pos, i] = np.sin(pos / (10000 ** ((2 * i)/d_model)))
 				
 			for i in range(1, d_model, 2):
-			  pe[pos, i] = math.cos(pos / (10000 ** ((2 * (i + 1))/d_model)))             
+			  pe[pos, i] = np.cos(pos / (10000 ** ((2 * (i + 1))/d_model)))             
 				
 		pe = pe.unsqueeze(0)
 		self.register_buffer('pe', pe)
 	
 	def forward(self, x):
-		seq_len = x.size(1)
-		x = x + Variable(self.pe[:,:seq_len],requires_grad=False)
-		return x
+		return x * torch.sqrt(self.d_model) + self.pe[:,:x.size(1)]
 
-def create_mask(x, y):
-	'''Create masks to be used in the decoder.
-	First has dimension [1,prediction_window,prediction_window]
-	Second has dimension [1,prediction_window,context_window]
+def create_mask(seq_len):
 	'''
-	nopeak_mask = np.triu(np.ones((1,x+1,y+1)),k=1).astype('uint8')
-	peak = torch.from_numpy(nopeak_mask)
-	nopeak = peak[:,:-1,1:]
-	peak_mask = nopeak.transpose(1,2)
-	peak_mask = Variable(peak_mask)
-	return peak_mask
+	Create a mask to be used in the decoder.
+	Returns a mask of shape (1, seq_len, seq_len)
+	'''
+	no_peak_mask = np.triu(np.ones((seq_len, seq_len)), k = 1).astype('uint8')
+	return torch.from_numpy(no_peak_mask)
 
 def get_clones(module, N):
 	'''
@@ -65,6 +51,8 @@ def scaled_dot_product_attention(k, q, v, mask = None):
 	k : (batch, seq_len_k, heads, d_model)
 	q : (batch, seq_len_q, heads, d_model)
 	v : (batch, seq_len_v, heads, d_model)
+
+	require seq_len_k == seq_len_v
 	'''
 
 	b, _, h, d = k.shape
@@ -84,25 +72,21 @@ def scaled_dot_product_attention(k, q, v, mask = None):
 
 class MultiHeadAttention(nn.Module):
 	'''This is a Mult-Head wide self-attention class.'''
-	def __init__(self, heads, d_model, context_window, pred_window,
-		first = None, dropout = 0.1, mask = None):
+	def __init__(self, heads, d_model, dropout = 0.1):
 		super().__init__()
 		
 		self.h = heads
-		self.dropout = nn.Dropout(dropout)
-		self.mask = mask
 		self.d_model = d_model
-		self.pred_window = pred_window
-		self.context_window = context_window
-		self.first = first
-		
-		self.q_linear = nn.Linear(d_model, heads*d_model,bias=False)
-		self.v_linear = nn.Linear(d_model, heads*d_model,bias=False)
-		self.k_linear = nn.Linear(d_model, heads*d_model,bias=False)
-		  
-		self.unifyheads = nn.Linear(heads*d_model, d_model)
 
-	def forward(self, q, k, v):
+		self.dropout = nn.Dropout(dropout)
+		
+		self.q_linear = nn.Linear(d_model, heads * d_model,bias=False)
+		self.v_linear = nn.Linear(d_model, heads * d_model,bias=False)
+		self.k_linear = nn.Linear(d_model, heads * d_model,bias=False)
+		  
+		self.unifyheads = nn.Linear(heads * d_model, d_model)
+
+	def forward(self, q, k, v, mask = None):
 
 		b = q.shape[0]
 
@@ -110,194 +94,179 @@ class MultiHeadAttention(nn.Module):
 		q = self.q_linear(q).view(b, -1, self.h, self.d_model)
 		v = self.v_linear(v).view(b, -1, self.h, self.d_model)
 
-		output = scaled_dot_product_attention(k, q, v, mask = self.mask)
+		output = scaled_dot_product_attention(k, q, v, mask = mask)
 		output = self.unifyheads(output)
 
 		return output
 
 class FeedForward(nn.Module):
 	'''This is a pointwise feedforward network.'''
-	def __init__(self, d_model, dropout = 0.1):
+	def __init__(self, d_model, dff, dropout = 0.1):
 		super().__init__()
 		
-		self.linear = nn.Sequential(
-			nn.Linear(d_model,10 * d_model),
+		self.ff = nn.Sequential(
+			nn.Linear(d_model, dff),
 			nn.ReLU(),
 			nn.Dropout(dropout),
-			nn.Linear(10 * d_model,d_model)
-		)
+			nn.Linear(dff, d_model))
 	
 	def forward(self, x):
-		x = self.linear(x)
+		x = self.ff(x)
 		return x 
 
 class EncoderLayer(nn.Module):
 	'''Encoder layer class.'''
-	def __init__(self, heads, d_model, context_window, pred_window, dropout = 0.1):
+	def __init__(self, heads, d_model, dff, dropout = 0.1):
 		super().__init__()
-
-		self.d_model = d_model
-		self.heads = heads
 
 		self.norm_1 = nn.LayerNorm(d_model)
 		self.norm_2 = nn.LayerNorm(d_model)
 
-		self.attn = MultiHeadAttention(heads, d_model, context_window, pred_window, dropout = dropout)
-		self.ff = FeedForward(d_model)
+		self.attn = MultiHeadAttention(heads, d_model, dropout = dropout)
+		self.ff = FeedForward(d_model, dff)
 
 		self.dropout_1 = nn.Dropout(dropout)
 		self.dropout_2 = nn.Dropout(dropout)
 	
-	def forward(self,x):
-		x2 = self.norm_1(x)
-		x = x + self.dropout_1(self.attn(x2,x2,x2))
-		x2 = self.norm_2(x)
-		x = x + self.dropout_2(self.ff(x2))
+	def forward(self, x):
+		attn_out = self.dropout_1(self.attn(x, x, x))
+		x = self.norm_1(x + attn_out)
+
+		ffn_out = self.ff(x)
+		x = self.norm_2(x + ffn_out)
+
 		return x
 
 class Encoder(nn.Module):
-	'''Stacked encoder class.'''
-	def __init__(self, N, pe_window, heads, d_model, context_window, pred_window, dropout):
+	'''Stacked encoder layers.'''
+	def __init__(self, N, pe_window, heads, inp_dim, d_model, dff, dropout):
 		super().__init__()
 
 		self.N = N
+		self.embedding = nn.Linear(inp_dim, d_model)
 		self.pe = PositionalEncoding(pe_window, d_model)
-		self.dynamiclayers = get_clones(EncoderLayer(heads, d_model, context_window, pred_window,
-			dropout = dropout), N)
-		self.norm = nn.LayerNorm(d_model)
+		self.dynamiclayers = get_clones(EncoderLayer(heads, d_model, dff, dropout = dropout), N)
 
-	def forward(self,x):
-		x = self.pe(x)
+	def forward(self, x):
+		# x (batch, seq_len, inp_dim)
+
+		x = self.embedding(x) # (batch, seq_len, d_model)
+		
+		x = self.pe(x) # (batch, seq_len, d_model)
 
 		for i in range(self.N):
-		  x = self.dynamiclayers[i](x)
-		return self.norm(x)
+		  x = self.dynamiclayers[i](x) # (batch, seq_len, d_model)
+
+		return x # (batch, seq_len, d_model)
 
 class DecoderLayer(nn.Module):
 	'''Decoder Layer class'''
-	def __init__(self, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
+	def __init__(self, heads, d_model, dff, dropout = 0.1):
 		super().__init__()
-
-		self.d_model = d_model
-		self.heads = heads
 
 		self.norm_1 = nn.LayerNorm(d_model)
 		self.norm_2 = nn.LayerNorm(d_model)
 		self.norm_3 = nn.LayerNorm(d_model)
 
-		self.attn_1 = MultiHeadAttention(heads, d_model, context_window, pred_window,
-			dropout = dropout, mask = first_mask, first = False)
-		self.attn_2 = MultiHeadAttention(heads, d_model, context_window, pred_window,
-			dropout = dropout, first = False)
-		self.ff = FeedForward(d_model)
+		self.attn_1 = MultiHeadAttention(heads, d_model, dropout = dropout)
+		self.attn_2 = MultiHeadAttention(heads, d_model, dropout = dropout)
+		self.ff = FeedForward(d_model, dff)
 
 		self.dropout_1 = nn.Dropout(dropout)
 		self.dropout_2 = nn.Dropout(dropout)
 		self.dropout_3 = nn.Dropout(dropout)
 
-	def forward(self, x, enc_out):
-	
-		x2 = self.norm_1(x)
-		x = x + self.dropout_1(self.attn_1(x2,x2,x2))
-		x2 = self.norm_2(x)
-		x = x + self.dropout_2(self.attn_2(x2,enc_out,enc_out))
-		x2 = self.norm_3(x)
-		x = x + self.dropout_3(self.ff(x2))
-		return x
+	def forward(self, x, enc_out, mask = None):
+		# x (batch, seq_len, d_model)
+		# enc_out (batch, enc_seq_len, d_model)
+
+		attn_1_out = self.dropout_1(self.attn_1(x, x, x, mask = mask))
+		x = self.norm_1(x + attn_1_out) # (batch, seq_len, d_model)
+
+		attn_2_out = self.dropout_2(self.attn_2(x, enc_out, enc_out))
+		x = self.norm_2(x + attn_2_out) # (batch, seq_len, d_model)
+
+		ffn_out = self.dropout_3(self.ff(x))
+		x = self.norm_3(x + ffn_out) # (batch, seq_len, d_model)
+
+		return x # (batch, seq_len, d_model)
 
 class Decoder(nn.Module):
-	'''Stacked Decoder layer.'''
-	def __init__(self, N, pe_window, heads, d_model, context_window, pred_window, first_mask, dropout = 0.1):
+	'''Stacked decoder layers.'''
+	def __init__(self, N, pe_window, heads, inp_dim, d_model, dff, dropout = 0.1):
 		super().__init__()
 
 		self.N = N
+		self.embedding = nn.Linear(inp_dim, d_model)
 		self.pe = PositionalEncoding(pe_window, d_model)
-		self.decoderlayers = get_clones(DecoderLayer(heads, d_model, context_window,
-			pred_window, first_mask, dropout = dropout), N)
-		self.norm = nn.LayerNorm(d_model)
+		self.decoderlayers = get_clones(DecoderLayer(heads, d_model, dff, dropout = dropout), N)
 
-	def forward(self,x,enc_out):
-		x = self.pe(x)
+	def forward(self, x, enc_out, mask = None):
+		# x (batch, seq_len, inp_dim)
+		# enc_out (batch, enc_seq_len, d_model)
 
+		x = self.embedding(x) # (batch, seq_len, d_model)
+
+		x = self.pe(x) # (batch, seq_len, d_model)
+		
 		for i in range(self.N):
-			x = self.decoderlayers[i](x,enc_out)
-		return self.norm(x)
+			x = self.decoderlayers[i](x, enc_out, mask = mask) # (batch, seq_len, d_model)
+		
+		return x # (batch, seq_len, d_model)
 
 class Ml4fTransformer(nn.Module):
 	'''
-	Main transformer class
-	Input to encoder has dimension: [batch,context_window,d_model_dynamic]
-	The output has the same dimension. We then flatten the encoder output and do a
-	linear mapping from the feature space to price space. Hence we have [batch,context_window].
-	We then reshape this to get [batch,context_window,d_decode] dimension. The input to the
-	decoder has dimension [batch,prediction_window,d_decode]. We then do the two-layer self-attention
-	here which results in an output of size [batch,prediction_window,d_decode]. We reshape this to
-	[batch,prediction_window] and then this is the final output of the model, which is first inverted, 
-	and then passed on to the loss function.
+	Main transformer class.
+	experiment : selects sigmoid final activation if 'movement' else linear
+	inp_dim_e : number of dimensions of encoder input
+	inp_dim_d : number of dimensions of decoder input
+	d_model : model embedding dimension
+	dff : hidden dimension of feed forward network
+	N_e : number of encoder layers
+	N_d : number of decoder layers
+	heads : number of heads
 	'''
-	def __init__(self, experiment = 'return', d_model_e = 5, d_model_d = 1,
-		N = 2, heads = 4, first_mask = create_mask(5, 5), dropout = 0.1,
-		context_window = 15, pred_window = 5, pe_window = 15):
+	def __init__(self, inp_dim_e, inp_dim_d, experiment = 'return', d_model = 20,
+		dff = 80, N_e = 1, N_d = 1, heads = 4, dropout = 0.1, pe_window = 100):
 		super().__init__()
-		
-		self.d_model_d = d_model_d
-		self.d_model_e = d_model_e
-		self.context_window = context_window
-		self.pred_window = pred_window
-		self.dynamicencode = Encoder(N, pe_window, heads, d_model_e,
-			context_window, pred_window, dropout = dropout)
 
-		self.learn = nn.Sequential(
-			nn.Linear(context_window * d_model_e, pred_window * d_model_d),
-			nn.ReLU(),
-			nn.Dropout(dropout)
-			)
+		assert d_model % heads == 0
 		
-		self.decoder = Decoder(N, pe_window, heads, d_model_d, context_window, pred_window,
-			first_mask, dropout = dropout)
+		self.encoder = Encoder(N_e, pe_window, heads, inp_dim_e, d_model, dff, dropout = dropout)
 		
-		if experiment == 'return':
+		self.decoder = Decoder(N_d, pe_window, heads, inp_dim_d, d_model, dff, dropout = dropout)
+		
+		if experiment == 'movement':
 			self.map = nn.Sequential(
-				nn.Linear(pred_window, pred_window),
-				nn.ReLU(),
-				nn.Dropout(dropout)
-				)
+				nn.Linear(d_model, 1),
+				nn.Sigmoid())
 		else:
-			self.map = nn.Sequential(
-				nn.Linear(pred_window, pred_window),
-				nn.ReLU(),
-				nn.Dropout(dropout),
-				nn.Sigmoid()
-				)
+			self.map = nn.Linear(d_model, 1)
 	
-	def forward(self,x,y):
+	def forward(self, x, y, mask = None):
 		'''
-		x (batch, context_window, d_model_e)
-		y (batch, pred_window, d_model_d)
+		x (batch, in_seq_len, inp_dim_e)
+		y (batch, tar_seq_len, inp_dim_d)
 		'''
 
-		b = x.size(0)
-		enc_output = self.dynamicencode(x) # (batch, ctx_window, d_e)
-		enc_output = enc_output.view(b,-1) # (batch, ctx_window)
-		enc_map = self.learn(enc_output) # (batch, pred_window * d_d)
-		enc_map = enc_map.view(-1, self.pred_window, self.d_model_d) # (batch, pred_window, d_d)
-		dec_output = self.decoder(y, enc_map) # (batch, pred_window, d_d)
+		enc_out = self.encoder(x) # (batch, in_seq_len, d_model)
 
-		dec_output = dec_output.view(b, self.pred_window)
-		
-		final = self.map(dec_output)
+		dec_out = self.decoder(y, enc_out, mask = mask) # (batch, tar_seq_len, d_model)
+
+		final = self.map(dec_out) # (batch, tar_seq_len, 1)
+
 		return final
 
 if __name__ == '__main__':
 
-	mask = create_mask(5, 5)
-
-	model = Ml4fTransformer(experiment = 'return',
-		d_model_e = 5, d_model_d = 1, heads = 4, N = 4, first_mask = mask,
-		dropout = 0.1, context_window = 15, pred_window = 5, pe_window = 15).double()
+	model = Ml4fTransformer(5, 1)
 
 	x = torch.randn(4, 15, 5)
 	y = torch.randn(4, 5, 1)
+	mask = create_mask(y.shape[1])
 
-	print(model(x, y))
+	out = model(x, y, mask)
+
+	print(out)
+	print(out.shape)
 
