@@ -14,19 +14,19 @@ import copy
 import io
 from torch.autograd import Variable
 
-def split_data(inputs, label, future, window = 15,split_one = 1600, split_two = 1864):
+def split_data(inputs, label, future,split_one = 1400, split_two = 1562, split_three = 1988):
 	'''Helper function for splitting data into train, validation and test splits.'''
 	input_train = inputs[:split_one,:]
-	input_val = inputs[split_one+window:split_two,:]
-	input_test = inputs[split_two:,:]
+	input_val = inputs[split_one+20:split_two,:]
+	input_test = inputs[split_two:split_three,:]
 
 	future_train = future[:split_one,:]
-	future_val = future[split_one+window:split_two,:]
-	future_test = future[split_two:,:]
+	future_val = future[split_one+20:split_two,:]
+	future_test = future[split_two:split_three,:]
 
 	lab_train = label[:split_one,:]
-	lab_val = label[split_one+window:split_two,:]
-	lab_test = label[split_two:,:]
+	lab_val = label[split_one+20:split_two,:]
+	lab_test = label[split_two:split_three,:]
 
 	return input_train, input_val, input_test, future_train, future_val, future_test, lab_train, lab_val, lab_test
 
