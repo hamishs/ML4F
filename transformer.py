@@ -236,7 +236,7 @@ class Ml4fTransformer(nn.Module):
 		
 		self.decoder = Decoder(N_d, pe_window, heads, inp_dim_d, d_model, dff, dropout = dropout)
 		
-		if experiment == 'movement':
+		if experiment == 'hit':
 			self.map = nn.Sequential(
 				nn.Linear(d_model, 1),
 				nn.Sigmoid())
