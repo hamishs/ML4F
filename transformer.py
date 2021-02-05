@@ -256,6 +256,66 @@ class Ml4fTransformer(nn.Module):
 		final = self.map(dec_out) # (batch, tar_seq_len, 1)
 
 		return final
+	
+	
+'''
+Inference loop for returns
+
+
+model.eval()
+current_val_loss = 0.0
+epoch_prediction = []
+	
+for data in val_loader_target:
+      with torch.no_grad():
+
+        # Load the data for the current batch.
+        # We only require the input and label data, not the future sequence, since we are no longer using teacher forcing like we did during training.
+        portfolio,prices,token = data
+        # Normalise the input data.
+        packet_port,_,_ = data_switch.normal(portfolio)
+        token = token.unsqueeze(-2)
+        # Compute encoded representation which has dimension [batch_val,context,d_embed]
+        encoder_output = model.encoder(packet_port)
+      
+        # Create list containing the output at each position.
+        feature_seq_list = [token]
+
+        for time_step in range(prediction_window):
+
+            # Pass the stacked list of previous decoder outputs and use this as input to the decoder. We reshape to make sure
+            # it has dimension [batch_val,position in sequence,1]
+            decoder_input = torch.stack(feature_seq_list,1).view(batch_val,-1,1)
+            next_position = model.map(model.decoder(decoder_input,encoder_output,mask=None))
+            end_position = next_position[:,time_step:time_step+1,:]
+            # Since we already have the previous positions stored in feature_seq_list, we only add the newly computed position. 
+            feature_seq_list.append(end_position)
+
+        # next_position will dimension [batch_val,prediction_window,1] so we remove the final dimension.
+        predictions = next_position.squeeze(-1)
+      
+        # Store each batch of predictions.
+        epoch_prediction.append(predictions)
+
+        # Compute per-sequence loss.
+        loss = criterion(predictions,prices)
+        batch_loss = loss.item()/batch_val
+        current_val_loss += batch_loss
+
+    average_val_loss = current_val_loss/(len(val_loader_target))
+    loss_val_results.append(average_val_loss)
+
+    # Append epoch predictions if loss performance is better than all previous epochs.
+    if epoch > 0 and loss_val_results[-1] == min(loss_val_results):
+        predict_epoch = torch.stack(epoch_prediction,0).view(-1,prediction_window)
+        best_predictions.append(predict_epoch)
+
+    model.train()
+
+    print('The average loss on the training set for epoch {} is {}.'.format(epoch,average_loss))
+    print('The average loss on the validation set for epoch {} is {}'.format(epoch,average_val_loss))
+'''
+
 
 if __name__ == '__main__':
 
