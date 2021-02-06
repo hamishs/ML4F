@@ -11,6 +11,18 @@ import copy
 import io
 from torch.autograd import Variable
 
+def split_data(inputs, label, tokens, split_one = 1400, split_two = 1562, split_three = 1988):
+	'''Helper function for splitting data into train, validation and test splits.'''
+
+	def get_splits(X, s1, s2, s3):
+		return X[:s1], X[s1 + 20:s2], X[s2:s3]
+
+	input_train, input_val, input_test = get_splits(inputs, split_one, split_two, split_three)
+	token_train, token_val, token_test = get_splits(tokens, split_one, split_two, split_three)
+	lab_train, lab_val, lab_test = get_splits(label, split_one, split_two, split_three)
+
+	return input_train, input_val, input_test, token_train, token_val, token_test, lab_train, lab_val, lab_test
+
 def accuracy_calc(x,y):
 	'''
 	This is a function used to calculate accuracy in the price movement experiment.
@@ -106,7 +118,7 @@ class DataPreProcess():
 	  
 			price_label = label[self.window:,:self.potent].double()
 			price_token = label[self.window-1:-self.pred_window,:self.potent].double()
-			return price_label, price_token
+			return prices_label, hit_token
 
 	def shift_window(self):
 		'''Creates the input sequences and their corresponding future sequences.'''
@@ -138,27 +150,42 @@ class DataPreProcess():
 	def portfolio_stack(self):
 
 		x = self.shift_window()
-		x = x.view(-1,self.window,self.potent*self.d_model_e)
 		y,y_token = self.shift_pred()
-		y = y.view(-1,self.pred_window*self.potent)
 
-		x_train = x[:1400].view(-1,self.window,self.d_model_e)
-		x_val = x[1420:1562].view(-1,self.window,self.d_model_e)
-		x_test = x[1562:1988].view(-1,self.window,self.d_model_e)
+		x_prime = x[:,:self.d_model_e].view(-1,self.window,self.d_model_e)
 
-		y_train = y[:1400].view(-1,self.pred_window)
-		y_val = y[1420:1562].view(-1,self.pred_window)
-		y_test = y[1562:1988].view(-1,self.pred_window)
-	
-		y_token_train = y_token[:1400].contiguous().view(-1,1)
-		y_token_val = y_token[1420:1562].contiguous().view(-1,1)
-		y_token_test = y_token[1562:1988].contiguous().view(-1,1)
-	
-		sizes_check = (x_train.size(), y_train.size(),y_token_train.size())
+		y_token_prime = y_token[:,0].view(-1,1)
+		
+		y_prime = y[:,0].contiguous().view(-1,self.pred_window)
+		x_tr, x_v, x_te, y_tok_tr, y_tok_v, y_tok_te, y_tr, y_v, y_te = split_data(x_prime,y_prime,y_token_prime)
 
-		train_data = Ml4fDataset(x_train,y_train,y_token_train)
-		val_data = Ml4fDataset(x_val,y_val,y_token_val)
-		test_data = Ml4fDataset(x_test,y_test,y_token_test)
+		for pos in range(1,self.potent):
+		
+			x_new = x[:,pos*self.d_model_e:(pos+1)*self.d_model_e].view(-1,self.window,self.d_model_e)
+   
+			y_token_new = y_token[:,pos].view(-1,1)
+
+			y_new = y[:,pos].contiguous().view(-1,self.pred_window)
+
+			x_new_tr, x_new_v, x_new_te, y_new_tok_tr, y_new_tok_v, y_new_tok_te, y_new_tr, y_new_v, y_new_te = split_data(x_new,y_new,y_token_new)
+
+			x_tr = torch.cat((x_tr,x_new_tr), dim=0)
+			x_v = torch.cat((x_v,x_new_v), dim=0)
+			x_te = torch.cat((x_te,x_new_te), dim=0)
+   
+			y_tok_tr = torch.cat((y_tok_tr ,y_new_tok_tr), dim=0)
+			y_tok_v = torch.cat((y_tok_v,y_new_tok_v), dim=0)
+			y_tok_te = torch.cat((y_tok_te,y_new_tok_te), dim=0)
+   
+			y_tr = torch.cat((y_tr,y_new_tr), dim=0)
+			y_v = torch.cat((y_v,y_new_v), dim=0)
+			y_te = torch.cat((y_te,y_new_te), dim=0)
+
+		sizes_check = (x_tr.size(), y_tr.size(),y_tok_tr.size())
+
+		train_data = Ml4fDataset(x_tr,y_tr,y_tok_tr)
+		val_data = Ml4fDataset(x_v,y_v,y_tok_v)
+		test_data = Ml4fDataset(x_te,y_te,y_tok_te)
 
 		return train_data, val_data, test_data, sizes_check
 
