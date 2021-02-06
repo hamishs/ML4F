@@ -1,10 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-import torchvision
-from torchvision import transforms, utils
 import random
 import matplotlib.pyplot as plt
 import pandas as pd
