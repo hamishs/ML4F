@@ -118,7 +118,7 @@ class DataPreProcess():
 	  
 			price_label = label[self.window:,:self.potent].double()
 			price_token = label[self.window-1:-self.pred_window,:self.potent].double()
-			return prices_label, hit_token
+			return price_label, price_token
 
 	def shift_window(self):
 		'''Creates the input sequences and their corresponding future sequences.'''
