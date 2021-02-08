@@ -1,3 +1,8 @@
+import torch
+import numpy as np 
+import matplotlib.pyplot as plt
+from pytorch_lightning import metrics
+
 class Performance():
 	'''
 	Evaluation function.
@@ -89,9 +94,32 @@ class MetricManager:
 			out = start + ' '
 		else:
 			out = ''
-			
+
 		for met, name in zip(self.metrics, self.names):
 			res = met.compute().cpu().numpy()
 			out += '{} {:.8f} '.format(name, res)
 		out += end
 		return out
+
+class BinaryCrossEntropyMetric(metrics.Metric):
+	'''Binary cross entropy implemented as a pytorch_lightning metric'''
+	
+	def __init__(self, **kwargs):
+		super(BinaryCrossEntropyMetric, self).__init__(**kwargs)
+		self.N = 0
+		self.loss = 0
+		self.BCE = torch.nn.BCELoss()
+	
+	def update(self, y_pred, y_tar):
+		''' update the stored metric'''
+		y_pred = y_pred.detach()
+		y_tar = y_tar.detach()
+		
+		n_items = torch.numel(y_tar)
+		batch = self.BCE(y_pred, y_tar)
+		self.loss = self.loss * (self.N / (self.N + n_items)) + batch * (n_items / (self.N + n_items))
+		self.N += n_items
+	
+	def compute(self):
+		''' computes the current value of the metric'''
+		return self.loss
