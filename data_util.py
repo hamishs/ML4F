@@ -1,15 +1,7 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-import random
-import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import math
-import copy
-import io
-from torch.autograd import Variable
 
 def split_data(inputs, label, tokens, split_one = 1400, split_two = 1562, split_three = 1988):
 	'''Helper function for splitting data into train, validation and test splits.'''
@@ -74,10 +66,22 @@ class Ml4fDataset(Dataset):
 		return x,y,y_tok
 
 class DataPreProcess():
-	'''This class handles all data pre-processing for the model.'''
+	'''
+	This class handles all data pre-processing for the model.
+	Init args:
+	url_input : location of csv of input data.
+	url_label : location of csv of label data.
+	potent : number of stocks in the portfolio.
+	window : length of the context window.
+	label : the experiment to run. Determines the form of
+			the output labels. "return" gives labels as daily
+			returns, "price" gives raw price, hit gives +ve or -ve 
+			"movement" of the stock as 0, 1.
+	pred_window : length of the prediction window.
+	d_model_e : dimension of the input space e.g. 5 for OHLCV data.
+	'''
 	def __init__(self, url_input, url_label, potent, window = 8,
-		label = 'return',
-		pred_window = 3, d_model_e = 5):
+		label = 'return', pred_window = 3, d_model_e = 5):
 	
 		self.url_input = url_input
 		self.url_label = url_label
