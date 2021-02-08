@@ -85,7 +85,11 @@ class MetricManager:
 		start : optional starting string
 		end : optional ending string
 		'''
-		out = start + ' '
+		if len(start) > 0:
+			out = start + ' '
+		else:
+			out = ''
+			
 		for met, name in zip(self.metrics, self.names):
 			res = met.compute().cpu().numpy()
 			out += '{} {:.8f} '.format(name, res)
