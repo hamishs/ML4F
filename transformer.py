@@ -286,8 +286,8 @@ class LrSchedule:
 			param_group['lr'] = lr
 
 	def step(self):
-		self.optimizer_.step()
 		self.update_lr()
+		self.optimizer_.step()
 
 	def reset_lr(self, lr = 1e-3):
 		for param_group in self.optimizer_.param_groups:
