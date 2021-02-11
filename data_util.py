@@ -208,31 +208,55 @@ class Normalisation():
 		self.context_window = context_window
 		self.d_model_d = d_model_d
 
-	def normal(self, x): 
-		max_cols = []
-		min_cols = []
-		
-		x = torch.log(x)
+	'''def normal(self, x): 
+					max_cols = []
+					min_cols = []
+					
+					x = torch.log(x)
+					x = x.view(-1, self.d_model_e)
+					one,two = x.size()
+					x_norm = torch.zeros((one,two),dtype=torch.double)
+					for i in range(x.size(1)):
+						x_col = x[:,i:i+1]
+						max = torch.max(x_col,dim=0)[0]
+						max_cols.append(max) 
+						min = torch.min(x_col,dim=0)[0]
+						min_cols.append(min)
+						x_col = (x_col-min)/(max-min)
+						x_norm[:,i:i+1] = x_col
+					x_norm = x_norm.view(-1,self.context_window,self.d_model_e)
+			
+					price_max = torch.exp(max_cols[3])
+					price_min = torch.exp(min_cols[3])
+			
+					self.prev_max = max_cols[3]
+					self.prev_min = min_cols[3]
+			
+					return x_norm, price_max, price_min'''
+
+	def normal(self, x):
+
+		# log transform
+		x = torch.log(x) 
+
+		# flatten to cols of OHLCV
+		x_size = x.size()
 		x = x.view(-1, self.d_model_e)
-		one,two = x.size()
-		x_norm = torch.zeros((one,two),dtype=torch.double)
-		for i in range(x.size(1)):
-			x_col = x[:,i:i+1]
-			max = torch.max(x_col,dim=0)[0]
-			max_cols.append(max) 
-			min = torch.min(x_col,dim=0)[0]
-			min_cols.append(min)
-			x_col = (x_col-min)/(max-min)
-			x_norm[:,i:i+1] = x_col
-		x_norm = x_norm.view(-1,self.context_window,self.d_model_e)
 
-		price_max = torch.exp(max_cols[3])
-		price_min = torch.exp(min_cols[3])
+		# get column-wise min and max. Both (1, d_model_e)
+		min_, max_ = x.min(dim = 0, keepdim = True), x.max(dim = 0, keepdim = True)
 
-		self.prev_max = max_cols[3]
-		self.prev_min = min_cols[3]
+		# normalise and reset shape
+		x_norm = (x - min_)/(max_ - min_) # (..., d_model_e)
+		x_norm = x_norm.view(x_size)
 
-		return x_norm, price_max, price_min
+		price_max = torch.exp(max_[0,3])
+		price_min = torch.exp(min_[0,3])
+		self.prev_max = max_[0,3]
+		self.prev_min = min_[0,3]
+
+		return x_norm, min_, max_
+
 
 	def normal_future(self, y, min_ = None, max_ = None):
 		''' Log transform and min, max scaling of y. '''
