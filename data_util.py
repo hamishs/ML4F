@@ -208,32 +208,6 @@ class Normalisation():
 		self.context_window = context_window
 		self.d_model_d = d_model_d
 
-	'''def normal(self, x): 
-					max_cols = []
-					min_cols = []
-					
-					x = torch.log(x)
-					x = x.view(-1, self.d_model_e)
-					one,two = x.size()
-					x_norm = torch.zeros((one,two),dtype=torch.double)
-					for i in range(x.size(1)):
-						x_col = x[:,i:i+1]
-						max = torch.max(x_col,dim=0)[0]
-						max_cols.append(max) 
-						min = torch.min(x_col,dim=0)[0]
-						min_cols.append(min)
-						x_col = (x_col-min)/(max-min)
-						x_norm[:,i:i+1] = x_col
-					x_norm = x_norm.view(-1,self.context_window,self.d_model_e)
-			
-					price_max = torch.exp(max_cols[3])
-					price_min = torch.exp(min_cols[3])
-			
-					self.prev_max = max_cols[3]
-					self.prev_min = min_cols[3]
-			
-					return x_norm, price_max, price_min'''
-
 	def normal(self, x):
 
 		# log transform
@@ -244,7 +218,7 @@ class Normalisation():
 		x = x.view(-1, self.d_model_e)
 
 		# get column-wise min and max. Both (1, d_model_e)
-		min_, max_ = x.min(dim = 0, keepdim = True), x.max(dim = 0, keepdim = True)
+		min_, max_ = x.min(dim = 0, keepdim = True)[0], x.max(dim = 0, keepdim = True)[0]
 
 		# normalise and reset shape
 		x_norm = (x - min_)/(max_ - min_) # (..., d_model_e)
