@@ -106,8 +106,8 @@ class BinaryCrossEntropyMetric(metrics.Metric):
 	
 	def __init__(self, **kwargs):
 		super(BinaryCrossEntropyMetric, self).__init__(**kwargs)
-		self.N = 0
-		self.loss = 0
+		self.add_state('N', default = torch.tensor(0))
+		self.add_state('loss', default = torch.tensor(0))
 		self.BCE = torch.nn.BCELoss()
 	
 	def update(self, y_pred, y_tar):
@@ -128,18 +128,21 @@ class SignAccuracy(metrics.Metric):
 	''' Accuracy on the signs of the label and prediction.'''
 
 	def __init__(self, **kwargs):
-		super(SignAccuracy, self).__init__()
-		self.acc = metrics.classification.Accuracy(**kwargs)
+		super(SignAccuracy, self).__init__(**kwargs)
+		self.add_state('correct', default = torch.tensor(0), dist_reduce_fx = 'sum')
+		self.add_state('total', default = torch.tensor(0), dist_reduce_fx = 'sum')
 
 	def update(self, y_pred, y_tar):
 		'''update the stored accuracy'''
-		y_pred = (y_pred > 0).long()
+		y_pred = (y_pred > 0)
 		y_tar = (y_tar > 0).long()
-		self.acc.update(y_pred, y_tar)
+
+		self.correct += torch.sum(y_pred == y_tar)
+		self.total += y_tar.numel()
 
 	def compute(self):
 		''' computes the current value of the metric'''
-		return self.acc.compute()
+		return self.correct.float() / self.total
 
 
 
