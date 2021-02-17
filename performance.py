@@ -123,3 +123,27 @@ class BinaryCrossEntropyMetric(metrics.Metric):
 	def compute(self):
 		''' computes the current value of the metric'''
 		return self.loss
+
+class SignAccuracy(metrics.Metric):
+	''' Accuracy on the signs of the label and prediction.'''
+
+	def __init__(self, **kwargs):
+		super(SignAccuracy, self).__init__()
+		self.acc = metrics.classification.Accuracy(**kwargs)
+
+	def update(self, y_pred, y_tar):
+		'''update the stored accuracy'''
+		y_pred = (y_pred > 0).long()
+		y_tar = (y_tar > 0).long()
+		self.acc.update(y_pred, y_tar)
+
+	def compute(self):
+		''' computes the current value of the metric'''
+		return self.acc.compute()
+
+
+
+
+
+
+
