@@ -57,18 +57,21 @@ def scaled_dot_product_attention(k, q, v, mask = None):
 
 	b, _, h, d = k.shape
 
-	k = k.transpose(1, 2).contiguous().view(b * h, -1, d)
-	q = q.transpose(1, 2).contiguous().view(b * h, -1, d)
-	v = v.transpose(1, 2).contiguous().view(b * h, -1, d)
-	
-	scores = torch.matmul(q, k.transpose(1, 2))
+	k = k.permute(0, 2, 3, 1) # (..., d_model, seq_len_k)
+	q = q.permute(0, 2, 1, 3) # (..., seq_len_q, d_model)
+	v = v.permute(0, 2, 1, 3) # (..., seq_len_v, d_model)
+
+	scores = torch.matmul(q, k) # (..., seq_len_q, seq_len_k)
+	dk = torch.tensor(d, dtype = torch.float32)
+	scores = scores / torch.sqrt(dk)
 	if mask is not None:
 		scores = scores.masked_fill(mask == 0, -1e9)
-	scores = F.softmax(scores,dim=2)
+	scores = F.softmax(scores, dim = -1)
 
-	# Scaled dot-product.
-	scores = torch.matmul(scores, v).view(b, h, -1, d)
-	return scores.transpose(1, 2).contiguous().view(b, -1, h * d)
+	output = torch.matmul(scores, v) # (..., seq_len_q, d_model)
+	output = output.permute(0, 2, 1, 3) # (batch, seq_len_q, heads, d_model)
+
+	return output.reshape(b, -1, h * d)
 
 class MultiHeadAttention(nn.Module):
 	'''This is a Mult-Head wide self-attention class.'''
@@ -242,6 +245,8 @@ class Ml4fTransformer(nn.Module):
 				nn.Sigmoid())
 		else:
 			self.map = nn.Linear(d_model, 1)
+
+		#self.init_weights()
 	
 	def forward(self, x, y, mask = None):
 		'''
