@@ -246,10 +246,10 @@ class Ml4fTransformer(nn.Module):
 		
 		if experiment == 'hit':
 			self.map = nn.Sequential(
-				nn.Linear(d_model, 1),
+				nn.Linear(d_model, inp_dim_d),
 				nn.Sigmoid())
 		else:
-			self.map = nn.Linear(d_model, 1)
+			self.map = nn.Linear(d_model, inp_dim_d)
 
 		#self.init_weights()
 	
