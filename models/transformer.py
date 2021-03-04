@@ -71,7 +71,7 @@ def scaled_dot_product_attention(k, q, v, mask = None):
 	output = torch.matmul(scores, v) # (..., seq_len_q, d)
 	output = output.permute(0, 2, 1, 3) # (batch, seq_len_q, heads, d)
 
-	return output # (batch, seq_len_q, heads, d)
+	return output, scores # (batch, seq_len_q, heads, d)
 
 class MultiHeadAttention(nn.Module):
 	'''This is a Mult-Head self-attention class.'''
@@ -100,12 +100,12 @@ class MultiHeadAttention(nn.Module):
 		q = self.q_linear(q).view(b, -1, self.h, self.depth)
 		v = self.v_linear(v).view(b, -1, self.h, self.depth)
 
-		output = scaled_dot_product_attention(k, q, v, mask = mask)
+		output, attn_weights = scaled_dot_product_attention(k, q, v, mask = mask)
 
 		output = output.reshape(b, -1, self.d_model)
 		output = self.o_linear(output) # (batch, seq_len, d_model)
 
-		return output
+		return output, attn_weights
 
 class FeedForward(nn.Module):
 	'''This is a pointwise feedforward network.'''
@@ -137,7 +137,8 @@ class EncoderLayer(nn.Module):
 		self.dropout_2 = nn.Dropout(dropout)
 	
 	def forward(self, x):
-		attn_out = self.dropout_1(self.attn(x, x, x))
+		attn_out, _ = self.attn(x, x, x)
+		attn_out = self.dropout_1(attn_out)
 		x = self.norm_1(x + attn_out)
 
 		ffn_out = self.ff(x)
@@ -188,16 +189,18 @@ class DecoderLayer(nn.Module):
 		# x (batch, seq_len, d_model)
 		# enc_out (batch, enc_seq_len, d_model)
 
-		attn_1_out = self.dropout_1(self.attn_1(x, x, x, mask = mask))
+		attn_1_out, _ = self.attn_1(x, x, x, mask = mask)
+		attn_1_out = self.dropout_1(attn_1_out)
 		x = self.norm_1(x + attn_1_out) # (batch, seq_len, d_model)
 
-		attn_2_out = self.dropout_2(self.attn_2(x, enc_out, enc_out))
+		attn_2_out, attn_weights = self.attn_2(x, enc_out, enc_out)
+		attn_2_out = self.dropout_2(attn_2_out)
 		x = self.norm_2(x + attn_2_out) # (batch, seq_len, d_model)
 
 		ffn_out = self.dropout_3(self.ff(x))
 		x = self.norm_3(x + ffn_out) # (batch, seq_len, d_model)
 
-		return x # (batch, seq_len, d_model)
+		return x, attn_weights # (batch, seq_len, d_model)
 
 class Decoder(nn.Module):
 	'''Stacked decoder layers.'''
@@ -213,14 +216,17 @@ class Decoder(nn.Module):
 		# x (batch, seq_len, inp_dim)
 		# enc_out (batch, enc_seq_len, d_model)
 
+		attention_weights = {}
+
 		x = self.embedding(x) # (batch, seq_len, d_model)
 
 		x = self.pe(x) # (batch, seq_len, d_model)
 		
 		for i in range(self.N):
-			x = self.decoderlayers[i](x, enc_out, mask = mask) # (batch, seq_len, d_model)
+			x, attn_weights = self.decoderlayers[i](x, enc_out, mask = mask) # (batch, seq_len, d_model)
+			attention_weights[i] = attn_weights
 		
-		return x # (batch, seq_len, d_model)
+		return x, attention_weights # (batch, seq_len, d_model)
 
 class Ml4fTransformer(nn.Module):
 	'''
@@ -250,8 +256,6 @@ class Ml4fTransformer(nn.Module):
 				nn.Sigmoid())
 		else:
 			self.map = nn.Linear(d_model, inp_dim_d)
-
-		#self.init_weights()
 	
 	def forward(self, x, y, mask = None):
 		'''
@@ -261,11 +265,11 @@ class Ml4fTransformer(nn.Module):
 
 		enc_out = self.encoder(x) # (batch, in_seq_len, d_model)
 
-		dec_out = self.decoder(y, enc_out, mask = mask) # (batch, tar_seq_len, d_model)
+		dec_out, attention_weights = self.decoder(y, enc_out, mask = mask) # (batch, tar_seq_len, d_model)
 
 		final = self.map(dec_out) # (batch, tar_seq_len, 1)
 
-		return final
+		return final, attention_weights
 
 class LrSchedule:
 	'''
@@ -311,9 +315,10 @@ if __name__ == '__main__':
 	y = torch.randn(4, 5, 1)
 	mask = create_mask(y.shape[1])
 
-	out = model(x, y, mask)
+	out, attn_weights = model(x, y, mask)
 
 	print(out)
 	print(out.shape)
+	print(attn_weights)
 
 
