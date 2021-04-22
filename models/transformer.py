@@ -48,56 +48,64 @@ def get_clones(module, N):
 
 def scaled_dot_product_attention(k, q, v, mask = None):
 	'''
-	k : (batch, seq_len_k, heads, d_model)
-	q : (batch, seq_len_q, heads, d_model)
-	v : (batch, seq_len_v, heads, d_model)
+	k : (batch, seq_len_k, heads, d)
+	q : (batch, seq_len_q, heads, d)
+	v : (batch, seq_len_v, heads, d)
 
 	require seq_len_k == seq_len_v
 	'''
 
 	b, _, h, d = k.shape
 
-	k = k.transpose(1, 2).contiguous().view(b * h, -1, d)
-	q = q.transpose(1, 2).contiguous().view(b * h, -1, d)
-	v = v.transpose(1, 2).contiguous().view(b * h, -1, d)
-	
-	scores = torch.matmul(q, k.transpose(1, 2))
+	k = k.permute(0, 2, 3, 1) # (..., d, seq_len_k)
+	q = q.permute(0, 2, 1, 3) # (..., seq_len_q, d)
+	v = v.permute(0, 2, 1, 3) # (..., seq_len_v, d)
+
+	scores = torch.matmul(q, k) # (..., seq_len_q, seq_len_k)
+	dk = torch.tensor(d, dtype = torch.float32)
+	scores = scores / torch.sqrt(dk)
 	if mask is not None:
 		scores = scores.masked_fill(mask == 0, -1e9)
-	scores = F.softmax(scores,dim=2)
+	scores = F.softmax(scores, dim = -1)
 
-	# Scaled dot-product.
-	scores = torch.matmul(scores, v).view(b, h, -1, d)
-	return scores.transpose(1, 2).contiguous().view(b, -1, h * d)
+	output = torch.matmul(scores, v) # (..., seq_len_q, d)
+	output = output.permute(0, 2, 1, 3) # (batch, seq_len_q, heads, d)
+
+	return output, scores # (batch, seq_len_q, heads, d)
 
 class MultiHeadAttention(nn.Module):
-	'''This is a Mult-Head wide self-attention class.'''
+	'''This is a Mult-Head self-attention class.'''
 	def __init__(self, heads, d_model, dropout = 0.1):
 		super().__init__()
+
+		assert d_model % heads == 0
 		
 		self.h = heads
 		self.d_model = d_model
+		self.depth = d_model // heads
 
 		self.dropout = nn.Dropout(dropout)
 		
-		self.q_linear = nn.Linear(d_model, heads * d_model,bias=False)
-		self.v_linear = nn.Linear(d_model, heads * d_model,bias=False)
-		self.k_linear = nn.Linear(d_model, heads * d_model,bias=False)
+		self.q_linear = nn.Linear(d_model, d_model,bias=False)
+		self.v_linear = nn.Linear(d_model, d_model,bias=False)
+		self.k_linear = nn.Linear(d_model, d_model,bias=False)
 		  
-		self.unifyheads = nn.Linear(heads * d_model, d_model)
+		self.o_linear = nn.Linear(d_model, d_model)
 
 	def forward(self, q, k, v, mask = None):
 
 		b = q.shape[0]
 
-		k = self.k_linear(k).view(b, -1, self.h, self.d_model)
-		q = self.q_linear(q).view(b, -1, self.h, self.d_model)
-		v = self.v_linear(v).view(b, -1, self.h, self.d_model)
+		k = self.k_linear(k).view(b, -1, self.h, self.depth)
+		q = self.q_linear(q).view(b, -1, self.h, self.depth)
+		v = self.v_linear(v).view(b, -1, self.h, self.depth)
 
-		output = scaled_dot_product_attention(k, q, v, mask = mask)
-		output = self.unifyheads(output)
+		output, attn_weights = scaled_dot_product_attention(k, q, v, mask = mask)
 
-		return output
+		output = output.reshape(b, -1, self.d_model)
+		output = self.o_linear(output) # (batch, seq_len, d_model)
+
+		return output, attn_weights
 
 class FeedForward(nn.Module):
 	'''This is a pointwise feedforward network.'''
@@ -129,7 +137,8 @@ class EncoderLayer(nn.Module):
 		self.dropout_2 = nn.Dropout(dropout)
 	
 	def forward(self, x):
-		attn_out = self.dropout_1(self.attn(x, x, x))
+		attn_out, _ = self.attn(x, x, x)
+		attn_out = self.dropout_1(attn_out)
 		x = self.norm_1(x + attn_out)
 
 		ffn_out = self.ff(x)
@@ -180,16 +189,18 @@ class DecoderLayer(nn.Module):
 		# x (batch, seq_len, d_model)
 		# enc_out (batch, enc_seq_len, d_model)
 
-		attn_1_out = self.dropout_1(self.attn_1(x, x, x, mask = mask))
+		attn_1_out, _ = self.attn_1(x, x, x, mask = mask)
+		attn_1_out = self.dropout_1(attn_1_out)
 		x = self.norm_1(x + attn_1_out) # (batch, seq_len, d_model)
 
-		attn_2_out = self.dropout_2(self.attn_2(x, enc_out, enc_out))
+		attn_2_out, attn_weights = self.attn_2(x, enc_out, enc_out)
+		attn_2_out = self.dropout_2(attn_2_out)
 		x = self.norm_2(x + attn_2_out) # (batch, seq_len, d_model)
 
 		ffn_out = self.dropout_3(self.ff(x))
 		x = self.norm_3(x + ffn_out) # (batch, seq_len, d_model)
 
-		return x # (batch, seq_len, d_model)
+		return x, attn_weights # (batch, seq_len, d_model)
 
 class Decoder(nn.Module):
 	'''Stacked decoder layers.'''
@@ -205,14 +216,17 @@ class Decoder(nn.Module):
 		# x (batch, seq_len, inp_dim)
 		# enc_out (batch, enc_seq_len, d_model)
 
+		attention_weights = {}
+
 		x = self.embedding(x) # (batch, seq_len, d_model)
 
 		x = self.pe(x) # (batch, seq_len, d_model)
 		
 		for i in range(self.N):
-			x = self.decoderlayers[i](x, enc_out, mask = mask) # (batch, seq_len, d_model)
+			x, attn_weights = self.decoderlayers[i](x, enc_out, mask = mask) # (batch, seq_len, d_model)
+			attention_weights[i] = attn_weights
 		
-		return x # (batch, seq_len, d_model)
+		return x, attention_weights # (batch, seq_len, d_model)
 
 class Ml4fTransformer(nn.Module):
 	'''
@@ -238,10 +252,10 @@ class Ml4fTransformer(nn.Module):
 		
 		if experiment == 'hit':
 			self.map = nn.Sequential(
-				nn.Linear(d_model, 1),
+				nn.Linear(d_model, inp_dim_d),
 				nn.Sigmoid())
 		else:
-			self.map = nn.Linear(d_model, 1)
+			self.map = nn.Linear(d_model, inp_dim_d)
 	
 	def forward(self, x, y, mask = None):
 		'''
@@ -251,11 +265,11 @@ class Ml4fTransformer(nn.Module):
 
 		enc_out = self.encoder(x) # (batch, in_seq_len, d_model)
 
-		dec_out = self.decoder(y, enc_out, mask = mask) # (batch, tar_seq_len, d_model)
+		dec_out, attention_weights = self.decoder(y, enc_out, mask = mask) # (batch, tar_seq_len, d_model)
 
 		final = self.map(dec_out) # (batch, tar_seq_len, 1)
 
-		return final
+		return final, attention_weights
 
 class LrSchedule:
 	'''
@@ -292,65 +306,6 @@ class LrSchedule:
 	def reset_lr(self, lr = 1e-3):
 		for param_group in self.optimizer_.param_groups:
 			param_group['lr'] = lr
-	
-'''
-Inference loop for returns
-
-
-model.eval()
-current_val_loss = 0.0
-epoch_prediction = []
-	
-for data in val_loader_target:
-	  with torch.no_grad():
-
-		# Load the data for the current batch.
-		# We only require the input and label data, not the future sequence, since we are no longer using teacher forcing like we did during training.
-		portfolio,prices,token = data
-		# Normalise the input data.
-		packet_port,_,_ = data_switch.normal(portfolio)
-		token = token.unsqueeze(-2)
-		# Compute encoded representation which has dimension [batch_val,context,d_embed]
-		encoder_output = model.encoder(packet_port)
-	  
-		# Create list containing the output at each position.
-		feature_seq_list = [token]
-
-		for time_step in range(prediction_window):
-
-			# Pass the stacked list of previous decoder outputs and use this as input to the decoder. We reshape to make sure
-			# it has dimension [batch_val,position in sequence,1]
-			decoder_input = torch.stack(feature_seq_list,1).view(batch_val,-1,1)
-			next_position = model.map(model.decoder(decoder_input,encoder_output,mask=None))
-			end_position = next_position[:,time_step:time_step+1,:]
-			# Since we already have the previous positions stored in feature_seq_list, we only add the newly computed position. 
-			feature_seq_list.append(end_position)
-
-		# next_position will dimension [batch_val,prediction_window,1] so we remove the final dimension.
-		predictions = next_position.squeeze(-1)
-	  
-		# Store each batch of predictions.
-		epoch_prediction.append(predictions)
-
-		# Compute per-sequence loss.
-		loss = criterion(predictions,prices)
-		batch_loss = loss.item()/batch_val
-		current_val_loss += batch_loss
-
-	average_val_loss = current_val_loss/(len(val_loader_target))
-	loss_val_results.append(average_val_loss)
-
-	# Append epoch predictions if loss performance is better than all previous epochs.
-	if epoch > 0 and loss_val_results[-1] == min(loss_val_results):
-		predict_epoch = torch.stack(epoch_prediction,0).view(-1,prediction_window)
-		best_predictions.append(predict_epoch)
-
-	model.train()
-
-	print('The average loss on the training set for epoch {} is {}.'.format(epoch,average_loss))
-	print('The average loss on the validation set for epoch {} is {}'.format(epoch,average_val_loss))
-'''
-
 
 if __name__ == '__main__':
 
@@ -360,9 +315,10 @@ if __name__ == '__main__':
 	y = torch.randn(4, 5, 1)
 	mask = create_mask(y.shape[1])
 
-	out = model(x, y, mask)
+	out, attn_weights = model(x, y, mask)
 
 	print(out)
 	print(out.shape)
+	print(attn_weights)
 
 
